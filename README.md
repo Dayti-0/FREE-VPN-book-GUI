@@ -5,7 +5,7 @@
 ![License](https://img.shields.io/badge/License-MIT-yellow)
 
 ## 📌 Description
-MonVPN est une application **Python avec interface graphique (Tkinter)** permettant de se connecter facilement aux serveurs **VPNBook (PPTP)** sous Windows.  
+FREE VPN book Gui est une application **Python avec interface graphique (Tkinter)** permettant de se connecter facilement aux serveurs **VPNBook (PPTP)** sous Windows.  
 Elle propose :
 - La sélection d’un pays (France, UK, Allemagne, etc.)
 - La connexion/déconnexion rapide au VPN
