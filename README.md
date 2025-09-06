@@ -27,6 +27,7 @@ L'application nécessite quelques bibliothèques supplémentaires :
 - `pytesseract`
 - `beautifulsoup4`
 
+codex/implement-vpn-password-fetching-function-dr8n0s
 Vous pouvez installer ces bibliothèques avec la commande suivante (veillez à
 utiliser le même interpréteur Python que celui utilisé pour lancer
 l'application) :
@@ -42,3 +43,10 @@ python -m pip install requests pillow pytesseract beautifulsoup4
 >   [UB Mannheim](https://github.com/UB-Mannheim/tesseract/wiki) et assurez-vous
 >   que `tesseract.exe` est accessible dans votre `PATH`.
 > - **Linux** : `sudo apt install tesseract-ocr`.
+=======
+Elles peuvent être installées via :
+
+```bash
+pip install requests pillow pytesseract beautifulsoup4
+```
+ main
