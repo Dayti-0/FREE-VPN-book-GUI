@@ -12,7 +12,23 @@ Elle propose :
 - L’affichage de la latence en temps réel
 - La sauvegarde des logs dans un fichier texte
 - L’option pour afficher/masquer le mot de passe
+- La récupération automatique du mot de passe depuis le site VPNBook
 
 ⚠️ **Attention :**
 - Ce projet utilise les identifiants **VPNBook** (gratuits et publics).
 - Le mot de passe est enregistré en local dans un fichier `mdp.json`
+
+## 📦 Dépendances
+
+L'application nécessite quelques bibliothèques supplémentaires :
+
+- `requests`
+- `Pillow`
+- `pytesseract`
+- `beautifulsoup4`
+
+Elles peuvent être installées via :
+
+```bash
+pip install requests pillow pytesseract beautifulsoup4
+```

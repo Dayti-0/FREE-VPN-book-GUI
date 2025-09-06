@@ -7,6 +7,11 @@ import threading
 import tkinter.ttk as ttk
 import time
 import re
+import requests
+from io import BytesIO
+from PIL import Image
+import pytesseract
+from bs4 import BeautifulSoup
 
 NOM_CONNEXION = "VPN_PPTP"
 IDENTIFIANT = "vpnbook"
@@ -106,6 +111,35 @@ def charger_mot_de_passe():
 def enregistrer_mot_de_passe(mot_de_passe):
     with open(MDP_FILE, 'w') as f:
         json.dump({'mot_de_passe': mot_de_passe}, f)
+
+def fetch_vpnbook_password():
+    """Récupère automatiquement le mot de passe VPNBook.
+
+    Télécharge la page VPNBook, trouve l'image du mot de passe et
+    utilise l'OCR pour extraire le texte. Renvoie le mot de passe
+    (sans espaces) ou None en cas d'erreur.
+    """
+    try:
+        page = requests.get('https://www.vpnbook.com/freevpn', timeout=10)
+        page.raise_for_status()
+        soup = BeautifulSoup(page.text, 'html.parser')
+        img = soup.find('img', src=re.compile('password.png'))
+        if not img or not img.get('src'):
+            raise ValueError("Image du mot de passe introuvable")
+        img_url = img['src']
+        if not img_url.startswith('http'):
+            img_url = requests.compat.urljoin('https://www.vpnbook.com/freevpn', img_url)
+        img_resp = requests.get(img_url, timeout=10)
+        img_resp.raise_for_status()
+        image = Image.open(BytesIO(img_resp.content))
+        password = pytesseract.image_to_string(image)
+        password = ''.join(password.split())
+        if not password:
+            raise ValueError("Mot de passe illisible")
+        return password
+    except Exception as e:
+        messagebox.showerror("Erreur", f"Impossible de récupérer le mot de passe : {e}")
+        return None
 
 def est_connecte():
     try:
@@ -268,8 +302,17 @@ entry_id.pack(pady=5)
 label_mdp = tk.Label(fenetre, text="Mot de passe :")
 label_mdp.pack(pady=5)
 entry_mdp = tk.Entry(fenetre, show='*')
-entry_mdp.insert(0, charger_mot_de_passe())
 entry_mdp.pack(pady=5)
+# Préremplit avec l'ancien mot de passe si présent
+ancien_mdp = charger_mot_de_passe()
+if ancien_mdp:
+    entry_mdp.insert(0, ancien_mdp)
+# Récupération automatique du mot de passe actuel
+mdp_auto = fetch_vpnbook_password()
+if mdp_auto:
+    entry_mdp.delete(0, tk.END)
+    entry_mdp.insert(0, mdp_auto)
+    enregistrer_mot_de_passe(mdp_auto)
 
 bouton_show_mdp = tk.Button(fenetre, text="Afficher le mot de passe", command=toggle_mot_de_passe)
 bouton_show_mdp.pack(pady=5)
