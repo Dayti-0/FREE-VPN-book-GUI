@@ -182,17 +182,21 @@ def connecter():
 
 def connecter_plus_rapide():
     ajouter_log("Recherche du serveur le plus rapide...")
-    country, ip, latency = find_fastest_server()
-    if not ip:
-        ajouter_log("Impossible de déterminer le serveur le plus rapide.")
-        messagebox.showerror("Erreur", "Aucun serveur joignable.")
-        return
-    ajouter_log(f"Serveur choisi automatiquement : {ip} ({country}) avec une latence de {latency} ms")
-    ajouter_log("Tentative de connexion...")
     progress.config(mode='indeterminate')
     progress.start()
     bouton_connecter.config(state='disabled')
     bouton_fastest.config(state='disabled')
+    threading.Thread(target=connecter_plus_rapide_thread).start()
+
+def connecter_plus_rapide_thread():
+    country, ip, latency = find_fastest_server()
+    if not ip:
+        fenetre.after(0, stop_progress)
+        fenetre.after(0, lambda: messagebox.showerror("Erreur", "Aucun serveur joignable."))
+        fenetre.after(0, lambda: ajouter_log("Impossible de déterminer le serveur le plus rapide."))
+        return
+    fenetre.after(0, lambda: ajouter_log(f"Serveur choisi automatiquement : {ip} ({country}) avec une latence de {latency} ms"))
+    fenetre.after(0, lambda: ajouter_log("Tentative de connexion..."))
     threading.Thread(target=connecter_thread, args=(country, ip)).start()
 
 def connecter_thread(country=None, ip=None):
@@ -247,21 +251,32 @@ def deconnecter_action():
         messagebox.showerror("Erreur", "Échec de la déconnexion ou aucune connexion n'était active.")
         ajouter_log("Échec de la déconnexion ou aucune connexion active.")
 
+def measure_latency(ip):
+    """Mesure la latence vers une IP et renvoie la valeur en ms ou None."""
+    try:
+        output = subprocess.check_output(
+            f'ping -n 1 {ip}',
+            shell=True,
+            universal_newlines=True,
+            stderr=subprocess.STDOUT,
+            timeout=5,
+        )
+        match = re.search(r'(?:temps=|time=)\s*<?\s*(\d+)\s*ms', output, re.IGNORECASE)
+        if match:
+            return int(match.group(1))
+    except (subprocess.CalledProcessError, subprocess.TimeoutExpired):
+        pass
+    return None
+
 def ping_serveur(ip):
     global stop_ping_thread
     stop_ping_thread = False
     while not stop_ping_thread:
         if est_connecte():
-            try:
-                output = subprocess.check_output(f'ping -n 1 {ip}', shell=True, universal_newlines=True)
-                # On essaie d'extraire la latence avec une regex
-                match = re.search(r'(?:temps=|time=)\s*<?\s*(\d+)\s*ms', output, re.IGNORECASE)
-                if match:
-                    latence_ms = match.group(1)
-                    fenetre.after(0, lambda: label_latency.config(text=f"Latence : {latence_ms} ms"))
-                else:
-                    fenetre.after(0, lambda: label_latency.config(text="Latence : N/A"))
-            except subprocess.CalledProcessError:
+            latence_ms = measure_latency(ip)
+            if latence_ms is not None:
+                fenetre.after(0, lambda: label_latency.config(text=f"Latence : {latence_ms} ms"))
+            else:
                 fenetre.after(0, lambda: label_latency.config(text="Latence : N/A"))
         else:
             fenetre.after(0, lambda: label_latency.config(text="Latence : N/A"))
@@ -274,19 +289,8 @@ def find_fastest_server():
     best_latency = None
     for country, hosts in SERVERS.items():
         for host in hosts:
-            try:
-                output = subprocess.check_output(
-                    f'ping -n 1 {host}',
-                    shell=True,
-                    universal_newlines=True,
-                    stderr=subprocess.STDOUT,
-                    timeout=5,
-                )
-                match = re.search(r'(?:temps=|time=)\s*<?\s*(\d+)\s*ms', output, re.IGNORECASE)
-                if not match:
-                    continue
-                latency = int(match.group(1))
-            except (subprocess.CalledProcessError, subprocess.TimeoutExpired):
+            latency = measure_latency(host)
+            if latency is None:
                 continue
             if best_latency is None or latency < best_latency:
                 best_country = country
