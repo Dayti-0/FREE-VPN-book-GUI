@@ -31,6 +31,9 @@ SERVER_CHOICES = {
     for host in hosts
 }
 
+# Dictionnaire pour mémoriser les latences mesurées des serveurs
+SERVER_LATENCIES = {}
+
 # Logos ASCII par pays (extraits du bloc donné)
 ASCII_LOGOS = {
     'France': r"""
@@ -202,6 +205,7 @@ def connecter_plus_rapide_thread():
 def connecter_thread(country=None, ip=None):
     if ip is None or country is None:
         label = selected_server.get()
+        label = re.sub(r"\s*\(.*?ms\)", "", label).strip()
         country, ip = SERVER_CHOICES[label]
     mot_de_passe = entry_mdp.get()
 
@@ -267,6 +271,23 @@ def measure_latency(ip):
     except (subprocess.CalledProcessError, subprocess.TimeoutExpired):
         pass
     return None
+
+
+def update_server_latencies():
+    """Met à jour les latences de tous les serveurs et rafraîchit la liste."""
+    new_values = []
+    for label, (country, host) in SERVER_CHOICES.items():
+        latency = measure_latency(host)
+        SERVER_LATENCIES[(country, host)] = latency
+        new_values.append(
+            f"{country} – {host.split('.')[0]} ({latency if latency is not None else 'N/A'} ms)"
+        )
+
+    def refresh():
+        server_combobox.config(values=new_values)
+        server_combobox.current(0)
+
+    fenetre.after(0, refresh)
 
 def ping_serveur(ip):
     global stop_ping_thread
@@ -340,6 +361,9 @@ server_combobox = ttk.Combobox(
 )
 server_combobox.current(0)
 server_combobox.pack(pady=5)
+
+# Mise à jour asynchrone des latences des serveurs au démarrage
+threading.Thread(target=update_server_latencies, daemon=True).start()
 
 label_id = tk.Label(fenetre, text="Identifiant :")
 label_id.pack(pady=5)
