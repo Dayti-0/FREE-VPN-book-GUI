@@ -9,8 +9,7 @@ import time
 import re
 import requests
 from io import BytesIO
-from PIL import Image
-import pytesseract
+from PIL import Image, ImageTk
 from bs4 import BeautifulSoup
 
 NOM_CONNEXION = "VPN_PPTP"
@@ -112,13 +111,8 @@ def enregistrer_mot_de_passe(mot_de_passe):
     with open(MDP_FILE, 'w') as f:
         json.dump({'mot_de_passe': mot_de_passe}, f)
 
-def fetch_vpnbook_password():
-    """Récupère automatiquement le mot de passe VPNBook.
-
-    Télécharge la page VPNBook, trouve l'image du mot de passe et
-    utilise l'OCR pour extraire le texte. Renvoie le mot de passe
-    (sans espaces) ou None en cas d'erreur.
-    """
+def fetch_vpnbook_password_image():
+    """Télécharge l'image du mot de passe VPNBook et retourne un objet PhotoImage."""
     try:
         page = requests.get('https://www.vpnbook.com/freevpn', timeout=10)
         page.raise_for_status()
@@ -132,13 +126,9 @@ def fetch_vpnbook_password():
         img_resp = requests.get(img_url, timeout=10)
         img_resp.raise_for_status()
         image = Image.open(BytesIO(img_resp.content))
-        password = pytesseract.image_to_string(image)
-        password = ''.join(password.split())
-        if not password:
-            raise ValueError("Mot de passe illisible")
-        return password
+        return ImageTk.PhotoImage(image)
     except Exception as e:
-        messagebox.showerror("Erreur", f"Impossible de récupérer le mot de passe : {e}")
+        messagebox.showerror("Erreur", f"Impossible de récupérer l'image du mot de passe : {e}")
         return None
 
 def est_connecte():
@@ -187,8 +177,6 @@ def connecter_thread():
     ip = SERVERS[selected_country.get()]
     mot_de_passe = entry_mdp.get()
 
-    enregistrer_mot_de_passe(mot_de_passe)
-
     # Déconnecter si déjà connecté
     if est_connecte():
         ajouter_log("Déconnexion de la session VPN existante...")
@@ -200,6 +188,7 @@ def connecter_thread():
 
         ajouter_log("Connexion au VPN...")
         connecter_vpn(mot_de_passe)
+        enregistrer_mot_de_passe(mot_de_passe)
         fenetre.after(0, stop_progress)
         fenetre.after(0, lambda: messagebox.showinfo("Succès", "Connexion établie avec succès."))
         ajouter_log("Connexion établie avec succès.")
@@ -301,18 +290,19 @@ entry_id.pack(pady=5)
 
 label_mdp = tk.Label(fenetre, text="Mot de passe :")
 label_mdp.pack(pady=5)
+label_mdp_img = tk.Label(fenetre)
+label_mdp_img.pack(pady=5)
 entry_mdp = tk.Entry(fenetre, show='*')
 entry_mdp.pack(pady=5)
 # Préremplit avec l'ancien mot de passe si présent
 ancien_mdp = charger_mot_de_passe()
 if ancien_mdp:
     entry_mdp.insert(0, ancien_mdp)
-# Récupération automatique du mot de passe actuel
-mdp_auto = fetch_vpnbook_password()
-if mdp_auto:
-    entry_mdp.delete(0, tk.END)
-    entry_mdp.insert(0, mdp_auto)
-    enregistrer_mot_de_passe(mdp_auto)
+# Affiche l'image du mot de passe actuel
+mdp_image = fetch_vpnbook_password_image()
+if mdp_image:
+    label_mdp_img.config(image=mdp_image)
+    label_mdp_img.image = mdp_image
 
 bouton_show_mdp = tk.Button(fenetre, text="Afficher le mot de passe", command=toggle_mot_de_passe)
 bouton_show_mdp.pack(pady=5)
