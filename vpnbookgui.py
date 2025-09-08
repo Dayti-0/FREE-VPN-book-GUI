@@ -177,11 +177,28 @@ def connecter():
     progress.config(mode='indeterminate')
     progress.start()
     bouton_connecter.config(state='disabled')
+    bouton_fastest.config(state='disabled')
     threading.Thread(target=connecter_thread).start()
 
-def connecter_thread():
-    label = selected_server.get()
-    country, ip = SERVER_CHOICES[label]
+def connecter_plus_rapide():
+    ajouter_log("Recherche du serveur le plus rapide...")
+    country, ip, latency = find_fastest_server()
+    if not ip:
+        ajouter_log("Impossible de déterminer le serveur le plus rapide.")
+        messagebox.showerror("Erreur", "Aucun serveur joignable.")
+        return
+    ajouter_log(f"Serveur choisi automatiquement : {ip} ({country}) avec une latence de {latency} ms")
+    ajouter_log("Tentative de connexion...")
+    progress.config(mode='indeterminate')
+    progress.start()
+    bouton_connecter.config(state='disabled')
+    bouton_fastest.config(state='disabled')
+    threading.Thread(target=connecter_thread, args=(country, ip)).start()
+
+def connecter_thread(country=None, ip=None):
+    if ip is None or country is None:
+        label = selected_server.get()
+        country, ip = SERVER_CHOICES[label]
     mot_de_passe = entry_mdp.get()
 
     # Déconnecter si déjà connecté
@@ -216,6 +233,7 @@ def stop_progress():
     progress.stop()
     progress.config(mode='determinate', value=0)
     bouton_connecter.config(state='normal')
+    bouton_fastest.config(state='normal')
 
 def deconnecter_action():
     global stop_ping_thread
@@ -248,6 +266,33 @@ def ping_serveur(ip):
         else:
             fenetre.after(0, lambda: label_latency.config(text="Latence : N/A"))
         time.sleep(2)
+
+def find_fastest_server():
+    """Ping tous les serveurs et retourne celui avec la latence minimale."""
+    best_country = None
+    best_ip = None
+    best_latency = None
+    for country, hosts in SERVERS.items():
+        for host in hosts:
+            try:
+                output = subprocess.check_output(
+                    f'ping -n 1 {host}',
+                    shell=True,
+                    universal_newlines=True,
+                    stderr=subprocess.STDOUT,
+                    timeout=5,
+                )
+                match = re.search(r'(?:temps=|time=)\s*<?\s*(\d+)\s*ms', output, re.IGNORECASE)
+                if not match:
+                    continue
+                latency = int(match.group(1))
+            except (subprocess.CalledProcessError, subprocess.TimeoutExpired):
+                continue
+            if best_latency is None or latency < best_latency:
+                best_country = country
+                best_ip = host
+                best_latency = latency
+    return best_country, best_ip, best_latency
 
 def lancer_ping_thread(ip):
     global ping_thread
@@ -320,6 +365,9 @@ bouton_show_mdp.pack(pady=5)
 
 bouton_connecter = tk.Button(fenetre, text="Se connecter", command=connecter)
 bouton_connecter.pack(pady=10)
+
+bouton_fastest = tk.Button(fenetre, text="VPN le plus rapide", command=connecter_plus_rapide)
+bouton_fastest.pack(pady=10)
 
 bouton_deconnecter = tk.Button(fenetre, text="Se déconnecter", command=deconnecter_action)
 bouton_deconnecter.pack(pady=10)
