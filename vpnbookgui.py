@@ -17,12 +17,18 @@ IDENTIFIANT = "vpnbook"
 MDP_FILE = 'mdp.json'
 
 SERVERS = {
-    'France': 'FR200.vpnbook.com',
-    'UK': 'UK205.vpnbook.com',
-    'Allemagne': 'DE20.vpnbook.com',
-    'Pologne': 'PL134.vpnbook.com',
-    'Canada': 'CA149.vpnbook.com',
-    'USA': 'US16.vpnbook.com'
+    'France': ['FR200.vpnbook.com', 'FR231.vpnbook.com'],
+    'UK': ['UK205.vpnbook.com', 'UK175.vpnbook.com'],
+    'Allemagne': ['DE20.vpnbook.com', 'DE21.vpnbook.com'],
+    'Pologne': ['PL134.vpnbook.com', 'PL155.vpnbook.com'],
+    'Canada': ['CA149.vpnbook.com', 'CA198.vpnbook.com'],
+    'USA': ['US16.vpnbook.com', 'US21.vpnbook.com']
+}
+
+SERVER_CHOICES = {
+    f"{country} – {host.split('.')[0]}": (country, host)
+    for country, hosts in SERVERS.items()
+    for host in hosts
 }
 
 # Logos ASCII par pays (extraits du bloc donné)
@@ -174,7 +180,8 @@ def connecter():
     threading.Thread(target=connecter_thread).start()
 
 def connecter_thread():
-    ip = SERVERS[selected_country.get()]
+    label = selected_server.get()
+    country, ip = SERVER_CHOICES[label]
     mot_de_passe = entry_mdp.get()
 
     # Déconnecter si déjà connecté
@@ -194,7 +201,6 @@ def connecter_thread():
         ajouter_log("Connexion établie avec succès.")
         
         # Afficher le logo du pays sélectionné
-        country = selected_country.get()
         if country in ASCII_LOGOS:
             ajouter_log(ASCII_LOGOS[country])
 
@@ -273,13 +279,18 @@ fenetre.title("Connexion VPN")
 fenetre.geometry('500x600')
 fenetre.minsize(500, 600)
 
-label_server = tk.Label(fenetre, text="Sélectionnez un pays :")
+label_server = tk.Label(fenetre, text="Sélectionnez un serveur :")
 label_server.pack(pady=5)
 
-selected_country = tk.StringVar(fenetre)
-selected_country.set('France')
-option_menu = tk.OptionMenu(fenetre, selected_country, *SERVERS.keys())
-option_menu.pack(pady=5)
+selected_server = tk.StringVar(fenetre)
+server_combobox = ttk.Combobox(
+    fenetre,
+    textvariable=selected_server,
+    values=list(SERVER_CHOICES.keys()),
+    state='readonly'
+)
+server_combobox.current(0)
+server_combobox.pack(pady=5)
 
 label_id = tk.Label(fenetre, text="Identifiant :")
 label_id.pack(pady=5)
