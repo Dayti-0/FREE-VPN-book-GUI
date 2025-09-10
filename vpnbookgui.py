@@ -4,6 +4,7 @@ import subprocess
 import json
 import os
 import threading
+import queue
 import tkinter.ttk as ttk
 import time
 import re
@@ -33,6 +34,9 @@ SERVER_CHOICES = {
 
 # Dictionnaire pour mémoriser les latences mesurées des serveurs
 SERVER_LATENCIES = {}
+
+# File pour communiquer les mises à jour de latence entre threads
+latency_queue = queue.Queue()
 
 # Logos ASCII par pays (extraits du bloc donné)
 ASCII_LOGOS = {
@@ -283,11 +287,20 @@ def update_server_latencies():
             f"{country} – {host.split('.')[0]} ({latency if latency is not None else 'N/A'} ms)"
         )
 
-    def refresh():
+    latency_queue.put(new_values)
+
+
+def process_latency_queue():
+    """Applique les mises à jour de latence reçues depuis le thread."""
+    try:
+        new_values = latency_queue.get_nowait()
+    except queue.Empty:
+        pass
+    else:
         server_combobox.config(values=new_values)
         server_combobox.current(0)
-
-    fenetre.after(0, refresh)
+    finally:
+        fenetre.after(100, process_latency_queue)
 
 def ping_serveur(ip):
     global stop_ping_thread
@@ -364,6 +377,7 @@ server_combobox.pack(pady=5)
 
 # Mise à jour asynchrone des latences des serveurs au démarrage
 threading.Thread(target=update_server_latencies, daemon=True).start()
+fenetre.after(100, process_latency_queue)
 
 label_id = tk.Label(fenetre, text="Identifiant :")
 label_id.pack(pady=5)
