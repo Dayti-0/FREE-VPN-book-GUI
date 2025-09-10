@@ -130,7 +130,9 @@ def fetch_vpnbook_password_image():
         page = requests.get('https://www.vpnbook.com/freevpn', timeout=10)
         page.raise_for_status()
         soup = BeautifulSoup(page.text, 'html.parser')
-        img = soup.find('img', src=re.compile('password.png'))
+        # L'image du mot de passe est servie via un script PHP (ex: password.php?t=...&bg=2)
+        # Sélectionne l'image par sa classe "pwdimg" pour être plus robuste aux changements
+        img = soup.find('img', class_='pwdimg')
         if not img or not img.get('src'):
             raise ValueError("Image du mot de passe introuvable")
         img_url = img['src']
