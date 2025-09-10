@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 import tkinter as tk
 from tkinter import messagebox
 import subprocess
@@ -13,9 +14,18 @@ from io import BytesIO
 from PIL import Image, ImageTk
 from bs4 import BeautifulSoup
 
+# Optionnel : contourner certains anti-bots si présents
+try:
+    import cloudscraper
+    _HAS_CF = True
+except Exception:
+    _HAS_CF = False
+
+# -------------------- Constantes --------------------
 NOM_CONNEXION = "VPN_PPTP"
 IDENTIFIANT = "vpnbook"
 MDP_FILE = 'mdp.json'
+PAGE_URL = "https://www.vpnbook.com/freevpn"  # conserver SANS slash final pour éviter 404 à l'ouverture
 
 SERVERS = {
     'France': ['FR200.vpnbook.com', 'FR231.vpnbook.com'],
@@ -106,6 +116,56 @@ stop_ping_thread = False
 ping_thread = None
 show_password = False
 
+# -------------------- Réseau (session HTTP) --------------------
+def make_session():
+    if _HAS_CF:
+        s = cloudscraper.create_scraper()
+    else:
+        s = requests.Session()
+    s.headers.update({
+        "User-Agent": ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                       "AppleWebKit/537.36 (KHTML, like Gecko) "
+                       "Chrome/124.0.0.0 Safari/537.36"),
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        "Accept-Language": "fr,fr-FR;q=0.9,en-US;q=0.8,en;q=0.7",
+    })
+    return s
+
+SESSION = make_session()
+TIMEOUT = 12
+
+def _ensure_dir(url: str) -> str:
+    """Force le slash final pour que urljoin traite l'URL comme un répertoire."""
+    return url if url.endswith("/") else url + "/"
+
+def _get_base_href(soup: BeautifulSoup, fallback_url: str) -> str:
+    """
+    Si la page définit <base href="...">, on s'en sert pour résoudre les URLs relatives
+    (ex: 'password.php' => racine). Sinon on retombe sur l'URL de la page.
+    """
+    base = soup.find("base", href=True)
+    if base and base["href"].strip():
+        return _ensure_dir(base["href"].strip())
+    return _ensure_dir(fallback_url)
+
+def _extract_password_paths_from_scripts(soup: BeautifulSoup):
+    """
+    Cherche dans les <script> une mention de 'password.php' et renvoie
+    les chemins relatifs trouvés (ex: 'password.php' ou '/password.php').
+    """
+    import re
+    paths = []
+    for sc in soup.find_all("script"):
+        txt = sc.string or getattr(sc, "text", "") or ""
+        for m in re.finditer(r"""['"]([^'"]*password\.php)['"]""", txt, re.I):
+            paths.append(m.group(1))
+    seen = set(); out = []
+    for p in paths:
+        if p not in seen:
+            out.append(p); seen.add(p)
+    return out
+
+# -------------------- Utilitaires / Logs --------------------
 def ajouter_log(texte):
     """Ajoute une ligne de log dans la zone de texte."""
     text_log.config(state='normal')
@@ -124,28 +184,119 @@ def enregistrer_mot_de_passe(mot_de_passe):
     with open(MDP_FILE, 'w') as f:
         json.dump({'mot_de_passe': mot_de_passe}, f)
 
+# -------------------- Image du mot de passe (robuste) --------------------
 def fetch_vpnbook_password_image():
-    """Télécharge l'image du mot de passe VPNBook et retourne un objet PhotoImage."""
+    """
+    Télécharge l'image du mot de passe VPNBook et retourne un objet PhotoImage.
+    (Robuste aux cas où l'attribut src est vide et rempli côté JS.)
+    A l'écran, on n'affiche ni statut 'Image chargée' ni URL — seulement l'image.
+    """
+    from urllib.parse import urljoin, urlencode, urlsplit
+
     try:
-        page = requests.get('https://www.vpnbook.com/freevpn', timeout=10)
-        page.raise_for_status()
-        soup = BeautifulSoup(page.text, 'html.parser')
-        # L'image du mot de passe est servie via un script PHP (ex: password.php?t=...&bg=2)
-        # Sélectionne l'image par sa classe "pwdimg" pour être plus robuste aux changements
-        img = soup.find('img', class_='pwdimg')
-        if not img or not img.get('src'):
-            raise ValueError("Image du mot de passe introuvable")
-        img_url = img['src']
-        if not img_url.startswith('http'):
-            img_url = requests.compat.urljoin('https://www.vpnbook.com/freevpn', img_url)
-        img_resp = requests.get(img_url, timeout=10)
-        img_resp.raise_for_status()
-        image = Image.open(BytesIO(img_resp.content))
-        return ImageTk.PhotoImage(image)
+        # 1) Charger la page
+        r = SESSION.get(PAGE_URL, timeout=TIMEOUT)
+        r.raise_for_status()
+        soup = BeautifulSoup(r.text, "html.parser")
+
+        # 2) Trouver le noeud <img> (classe 'pwdimg' ou fallback par src)
+        node = soup.select_one("img.pwdimg") or soup.select_one("img[src*='password.php']")
+
+        # 3) Base pour résoudre les URLs (respecte <base href>)
+        base_for_join = _get_base_href(soup, r.url)
+
+        # 4) Construire les chemins relatifs possibles
+        rel_paths = []
+        if node and (node.get("src") or "").strip():
+            rel_paths.append(node["src"].strip())
+
+        # Ajouter les chemins repérés dans <script> (si le site les met là)
+        rel_paths += _extract_password_paths_from_scripts(soup)
+
+        # Fallback standard si rien trouvé
+        if "password.php" not in " ".join(rel_paths):
+            rel_paths.append("password.php")
+
+        # Dédoublonnage
+        seen = set()
+        rel_paths = [p for p in rel_paths if not (p in seen or seen.add(p))]
+
+        # 5) Générer les variantes de query (?t=..., &bg=...)
+        bg = (node.get("data-bg") or "").strip() if node else ""
+        if not bg.isdigit():
+            bg = ""
+
+        t_sec = str(int(time.time()))
+        t_ms  = str(int(time.time() * 1000))
+        t_ym  = time.strftime("%Y%m%d%H%M")
+
+        qs_variants = []
+        if bg:
+            qs_variants += [
+                {"t": t_sec, "bg": bg},
+                {"t": t_ms,  "bg": bg},
+                {"t": t_ym,  "bg": bg},
+                {"bg": bg},
+            ]
+        qs_variants += [
+            {"t": t_sec},
+            {"t": t_ms},
+            {"t": t_ym},
+            {},
+        ]
+        # Dédoublonnage des dicts
+        uniq_qs = []
+        seen_qs = set()
+        for d in qs_variants:
+            key = tuple(sorted(d.items()))
+            if key not in seen_qs:
+                uniq_qs.append(d); seen_qs.add(key)
+
+        # 6) Construire les URLs absolues candidates
+        urls = []
+        for rel in rel_paths:
+            for qs in uniq_qs:
+                query = ("?" + urlencode(qs)) if qs else ""
+                urls.append(urljoin(base_for_join, rel) + query)
+
+        # Ajouter aussi la racine du site au cas où <base href> serait absent
+        origin = f"{urlsplit(r.url).scheme}://{urlsplit(r.url).netloc}/"
+        for qs in uniq_qs:
+            query = ("?" + urlencode(qs)) if qs else ""
+            urls.append(urljoin(origin, "password.php") + query)
+
+        # Dédoublonnage des URLs
+        seen = set()
+        urls = [u for u in urls if not (u in seen or seen.add(u))]
+
+        # 7) Essayer chaque URL jusqu'à obtenir une vraie image
+        headers = SESSION.headers.copy()
+        headers["Accept"] = "image/avif,image/webp,image/apng,image/*,*/*;q=0.8"
+        headers["Referer"] = PAGE_URL
+
+        last_err = None
+        for u in urls:
+            try:
+                resp = SESSION.get(u, headers=headers, timeout=TIMEOUT)
+                resp.raise_for_status()
+                data = resp.content
+                # Vérifier que c'est bien une image décodable
+                img = Image.open(BytesIO(data))
+                # Important: convertir en PhotoImage ensuite
+                return ImageTk.PhotoImage(img)
+            except Exception as ex:
+                last_err = ex
+                continue
+
+        # si rien n'a marché
+        raise RuntimeError(f"Aucune URL candidate valide. Dernière erreur: {last_err}")
+
     except Exception as e:
-        messagebox.showerror("Erreur", f"Impossible de récupérer l'image du mot de passe : {e}")
+        # Ici on reste discret : pas d'URL ni de détail à l'écran (juste une alerte)
+        messagebox.showerror("Erreur", f"Impossible de récupérer l'image du mot de passe.")
         return None
 
+# -------------------- Connexion / VPN --------------------
 def est_connecte():
     try:
         output = subprocess.check_output('rasdial', shell=True, stderr=subprocess.STDOUT, universal_newlines=True)
@@ -278,7 +429,6 @@ def measure_latency(ip):
         pass
     return None
 
-
 def update_server_latencies():
     """Met à jour les latences de tous les serveurs et rafraîchit la liste."""
     new_values = []
@@ -288,9 +438,7 @@ def update_server_latencies():
         new_values.append(
             f"{country} – {host.split('.')[0]} ({latency if latency is not None else 'N/A'} ms)"
         )
-
     latency_queue.put(new_values)
-
 
 def process_latency_queue():
     """Applique les mises à jour de latence reçues depuis le thread."""
@@ -358,24 +506,34 @@ def sauvegarder_logs():
         f.write(contenu)
     messagebox.showinfo("Sauvegarde", "Les logs ont été sauvegardés dans vpn_logs.txt")
 
+def rafraichir_image_mdp():
+    """Recharge l'image du mot de passe et met à jour le label. Aucun texte/URL affiché à l'écran."""
+    def worker():
+        img = fetch_vpnbook_password_image()
+        if img:
+            fenetre.after(0, lambda: (label_mdp_img.config(image=img), setattr(label_mdp_img, 'image', img)))
+    threading.Thread(target=worker, daemon=True).start()
+
 # ------------------- Interface graphique -------------------
 fenetre = tk.Tk()
 fenetre.title("Connexion VPN")
-fenetre.geometry('500x600')
-fenetre.minsize(500, 600)
+fenetre.geometry('650x700')     # fenêtre élargie
+fenetre.minsize(650, 700)
 
 label_server = tk.Label(fenetre, text="Sélectionnez un serveur :")
-label_server.pack(pady=5)
+label_server.pack(pady=(10, 5))
 
 selected_server = tk.StringVar(fenetre)
 server_combobox = ttk.Combobox(
     fenetre,
     textvariable=selected_server,
     values=list(SERVER_CHOICES.keys()),
-    state='readonly'
+    state='readonly',
+    width=60  # ← élargit nettement le sélecteur (en caractères)
 )
 server_combobox.current(0)
-server_combobox.pack(pady=5)
+# on laisse le widget s'étirer horizontalement
+server_combobox.pack(pady=5, padx=10, fill='x', expand=True)
 
 # Mise à jour asynchrone des latences des serveurs au démarrage
 threading.Thread(target=update_server_latencies, daemon=True).start()
@@ -386,26 +544,40 @@ label_id.pack(pady=5)
 entry_id = tk.Entry(fenetre)
 entry_id.insert(0, IDENTIFIANT)
 entry_id.config(state='disabled')
-entry_id.pack(pady=5)
+entry_id.pack(pady=5, padx=10, fill='x')
 
 label_mdp = tk.Label(fenetre, text="Mot de passe :")
-label_mdp.pack(pady=5)
+label_mdp.pack(pady=(12, 5))
+
+# Image du mot de passe (aucun texte d'état ni URL à l'écran)
 label_mdp_img = tk.Label(fenetre)
 label_mdp_img.pack(pady=5)
+
+# Champ mot de passe (texte masqué)
 entry_mdp = tk.Entry(fenetre, show='*')
-entry_mdp.pack(pady=5)
+entry_mdp.pack(pady=5, padx=10, fill='x')
+
 # Préremplit avec l'ancien mot de passe si présent
 ancien_mdp = charger_mot_de_passe()
 if ancien_mdp:
     entry_mdp.insert(0, ancien_mdp)
-# Affiche l'image du mot de passe actuel
+
+# Boutons autour du mot de passe
+frame_pwd_buttons = tk.Frame(fenetre)
+frame_pwd_buttons.pack(pady=6)
+
+bouton_show_mdp = tk.Button(frame_pwd_buttons, text="Afficher le mot de passe", command=toggle_mot_de_passe)
+bouton_show_mdp.grid(row=0, column=0, padx=4, pady=2)
+
+# Option pratique : rafraîchir l'image sans relancer l'app
+tk.Button(frame_pwd_buttons, text="Rafraîchir l'image", command=rafraichir_image_mdp)\
+  .grid(row=0, column=1, padx=4, pady=2)
+
+# Chargement initial de l'image (synchrone simple au démarrage)
 mdp_image = fetch_vpnbook_password_image()
 if mdp_image:
     label_mdp_img.config(image=mdp_image)
     label_mdp_img.image = mdp_image
-
-bouton_show_mdp = tk.Button(fenetre, text="Afficher le mot de passe", command=toggle_mot_de_passe)
-bouton_show_mdp.pack(pady=5)
 
 bouton_connecter = tk.Button(fenetre, text="Se connecter", command=connecter)
 bouton_connecter.pack(pady=10)
@@ -417,17 +589,17 @@ bouton_deconnecter = tk.Button(fenetre, text="Se déconnecter", command=deconnec
 bouton_deconnecter.pack(pady=10)
 
 progress = ttk.Progressbar(fenetre, orient="horizontal", mode="determinate", maximum=100, value=0)
-progress.pack(pady=10)
+progress.pack(pady=10, padx=10, fill='x')
 
 label_latency = tk.Label(fenetre, text="Latence : N/A")
 label_latency.pack(pady=10)
 
 # Zone de logs
 frame_logs = tk.Frame(fenetre)
-frame_logs.pack(fill='both', expand=True, pady=10)
+frame_logs.pack(fill='both', expand=True, pady=10, padx=10)
 
 label_logs = tk.Label(frame_logs, text="Logs :")
-label_logs.pack()
+label_logs.pack(anchor='w')
 
 text_log = tk.Text(frame_logs, state='disabled', wrap='word', height=10)
 text_log.pack(fill='both', expand=True)
