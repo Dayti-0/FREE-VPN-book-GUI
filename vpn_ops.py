@@ -37,20 +37,22 @@ def deconnecter_vpn():
         return False
 
 
-def creer_ou_mettre_a_jour_vpn(ip):
+def creer_ou_mettre_a_jour_vpn(ip, split_tunneling=False):
+    split_param = "$true" if split_tunneling else "$false"
     check_cmd = f"powershell -Command \"Get-VpnConnection -Name '{NOM_CONNEXION}'\""
     try:
         subprocess.check_output(check_cmd, shell=True, stderr=subprocess.STDOUT)
         set_cmd = (
             f"powershell -Command \"Set-VpnConnection -Name '{NOM_CONNEXION}' "
-            f"-ServerAddress '{ip}' -Force\""
+            f"-ServerAddress '{ip}' -SplitTunneling {split_param} -Force\""
         )
         subprocess.check_output(set_cmd, shell=True, stderr=subprocess.STDOUT)
     except subprocess.CalledProcessError:
         add_cmd = (
             f"powershell -Command \"Add-VpnConnection -Name '{NOM_CONNEXION}' "
             f"-ServerAddress '{ip}' -TunnelType 'Pptp' "
-            f"-AuthenticationMethod 'MSChapv2' -EncryptionLevel 'Optional' -Force\""
+            f"-AuthenticationMethod 'MSChapv2' -EncryptionLevel 'Optional' "
+            f"-SplitTunneling {split_param} -Force\""
         )
         subprocess.check_output(add_cmd, shell=True, stderr=subprocess.STDOUT)
 
