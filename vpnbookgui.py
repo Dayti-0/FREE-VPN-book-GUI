@@ -2,7 +2,7 @@
 """Interface graphique principale pour l'application VPNBook GUI."""
 
 import tkinter as tk
-from tkinter import filedialog, messagebox
+from tkinter import messagebox
 import json
 import os
 import subprocess
@@ -89,23 +89,14 @@ def connecter_thread(country=None, ip=None):
         label = re.sub(r"\s*\(.*?ms\)", "", label).strip()
         country, ip = SERVER_CHOICES[label]
     mot_de_passe = entry_mdp.get()
-    split_tunneling_enabled = split_tunneling_var.get()
-    application_path = app_path_var.get().strip()
 
     if est_connecte():
         ajouter_log("Déconnexion de la session VPN existante...")
         deconnecter_vpn()
 
     try:
-        if split_tunneling_enabled:
-            ajouter_log(
-                "Split tunneling activé : seul le trafic explicitement routé passera par le VPN."
-            )
-        else:
-            ajouter_log("Split tunneling désactivé : tout le trafic passera par le VPN.")
-
         ajouter_log(f"Création ou mise à jour de la connexion vers {ip}...")
-        creer_ou_mettre_a_jour_vpn(ip, split_tunneling=split_tunneling_enabled)
+        creer_ou_mettre_a_jour_vpn(ip)
 
         ajouter_log("Connexion au VPN...")
         connecter_vpn(mot_de_passe)
@@ -118,17 +109,6 @@ def connecter_thread(country=None, ip=None):
             ajouter_log(ASCII_LOGOS[country])
 
         lancer_ping_thread(ip)
-
-        if application_path:
-            try:
-                ajouter_log(
-                    f"Lancement de l'application sélectionnée pour profiter du VPN : {application_path}"
-                )
-                subprocess.Popen(f'"{application_path}"', shell=True)
-            except OSError as exc:
-                ajouter_log(
-                    f"Impossible de lancer l'application sélectionnée ({application_path}) : {exc}"
-                )
 
     except subprocess.CalledProcessError as e:  # type: ignore[name-defined]
         fenetre.after(0, stop_progress)
@@ -206,19 +186,6 @@ def toggle_mot_de_passe():
         bouton_show_mdp.config(text="Afficher le mot de passe")
 
 
-def choisir_application():
-    chemin = filedialog.askopenfilename(
-        title="Sélectionner l'application à utiliser avec le VPN",
-        filetypes=[("Applications Windows", "*.exe"), ("Tous les fichiers", "*.*")],
-    )
-    if chemin:
-        app_path_var.set(chemin)
-        label_application.config(text=os.path.basename(chemin))
-    else:
-        app_path_var.set("")
-        label_application.config(text="Aucune application sélectionnée")
-
-
 def sauvegarder_logs():
     """Sauvegarder le contenu des logs dans un fichier texte."""
     with open("vpn_logs.txt", "w", encoding="utf-8") as f:
@@ -259,9 +226,6 @@ server_combobox.pack(pady=5, padx=10, fill='x', expand=True)
 threading.Thread(target=update_server_latencies, daemon=True).start()
 fenetre.after(100, process_latency_queue)
 
-split_tunneling_var = tk.BooleanVar(fenetre, value=False)
-app_path_var = tk.StringVar(fenetre, value="")
-
 label_id = tk.Label(fenetre, text="Identifiant :")
 label_id.pack(pady=5)
 entry_id = tk.Entry(fenetre)
@@ -296,29 +260,6 @@ mdp_image = fetch_vpnbook_password_image()
 if mdp_image:
     label_mdp_img.config(image=mdp_image)
     label_mdp_img.image = mdp_image
-
-frame_split = tk.Frame(fenetre)
-frame_split.pack(pady=(10, 0), padx=10, fill='x')
-
-split_checkbox = tk.Checkbutton(
-    frame_split,
-    text="Activer le split tunneling (ne pas router tout le trafic dans le VPN)",
-    variable=split_tunneling_var,
-    anchor='w',
-    justify='left',
-    wraplength=500,
-)
-split_checkbox.pack(anchor='w')
-
-frame_application = tk.Frame(fenetre)
-frame_application.pack(pady=6, padx=10, fill='x')
-
-tk.Label(frame_application, text="Application à utiliser avec le VPN :").grid(row=0, column=0, sticky='w')
-label_application = tk.Label(frame_application, text="Aucune application sélectionnée")
-label_application.grid(row=1, column=0, sticky='w', padx=(0, 8), pady=(2, 0))
-tk.Button(frame_application, text="Choisir une application", command=choisir_application).grid(
-    row=1, column=1, padx=4
-)
 
 bouton_connecter = tk.Button(fenetre, text="Se connecter", command=connecter)
 bouton_connecter.pack(pady=10)
