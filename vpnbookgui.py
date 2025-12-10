@@ -28,7 +28,6 @@ from vpn_ops import (
 stop_ping_thread = False
 ping_thread = None
 show_password = False
-RUNNING_APPS = []
 
 
 # -------------------- Utilitaires / Logs --------------------
@@ -116,7 +115,6 @@ def connecter_thread(country=None, ip=None):
         country, ip = SERVER_CHOICES[label]
     mot_de_passe = entry_mdp.get()
     split_tunneling_enabled = split_tunneling_var.get()
-    selected_app = selected_app_var.get().strip()
 
     if est_connecte():
         ajouter_log("Déconnexion de la session VPN existante...")
@@ -125,7 +123,7 @@ def connecter_thread(country=None, ip=None):
     try:
         if split_tunneling_enabled:
             ajouter_log(
-                "Split tunneling activé : seul le trafic explicitement routé passera par le VPN."
+                "Split tunneling activé : seul le trafic VPN passera par le tunnel."
             )
         else:
             ajouter_log("Split tunneling désactivé : tout le trafic passera par le VPN.")
@@ -144,11 +142,6 @@ def connecter_thread(country=None, ip=None):
             ajouter_log(ASCII_LOGOS[country])
 
         lancer_ping_thread(ip)
-
-        if selected_app:
-            ajouter_log(
-                f"Application sélectionnée en cours d'exécution pour profiter du VPN : {selected_app}"
-            )
 
     except subprocess.CalledProcessError as e:  # type: ignore[name-defined]
         message = formater_message_erreur(getattr(e, 'output', ''))
@@ -227,46 +220,6 @@ def toggle_mot_de_passe():
         bouton_show_mdp.config(text="Afficher le mot de passe")
 
 
-def choisir_application():
-    selection = selected_app_var.get()
-    if selection:
-        label_application.config(text=selection)
-    else:
-        label_application.config(text="Aucune application sélectionnée")
-
-
-def refresh_running_apps():
-    global RUNNING_APPS
-    try:
-        output = subprocess.check_output(
-            'tasklist /FI "STATUS eq RUNNING"',
-            shell=True,
-            universal_newlines=True,
-            stderr=subprocess.STDOUT,
-        )
-        lignes = output.splitlines()
-        # Les premières lignes contiennent l'entête de tasklist
-        processus = []
-        for ligne in lignes:
-            if not ligne or 'Image Name' in ligne or '===' in ligne:
-                continue
-            processus.append(ligne.split()[0])
-        RUNNING_APPS = sorted(set(processus))
-    except subprocess.CalledProcessError as exc:
-        ajouter_log(
-            "Impossible de récupérer la liste des applications en cours d'exécution : "
-            f"{exc}"
-        )
-        RUNNING_APPS = []
-    finally:
-        if RUNNING_APPS:
-            selected_app_var.set(RUNNING_APPS[0])
-        else:
-            selected_app_var.set("")
-        app_combobox.config(values=RUNNING_APPS)
-        choisir_application()
-
-
 def sauvegarder_logs():
     """Sauvegarder le contenu des logs dans un fichier texte."""
     with open("vpn_logs.txt", "w", encoding="utf-8") as f:
@@ -308,7 +261,6 @@ threading.Thread(target=update_server_latencies, daemon=True).start()
 fenetre.after(100, process_latency_queue)
 
 split_tunneling_var = tk.BooleanVar(fenetre, value=False)
-selected_app_var = tk.StringVar(fenetre, value="")
 
 label_id = tk.Label(fenetre, text="Identifiant :")
 label_id.pack(pady=5)
@@ -350,37 +302,24 @@ frame_split.pack(pady=(10, 0), padx=10, fill='x')
 
 split_checkbox = tk.Checkbutton(
     frame_split,
-    text="Activer le split tunneling (ne pas router tout le trafic dans le VPN)",
+    text="Activer le split tunneling",
     variable=split_tunneling_var,
+    anchor='w',
+    justify='left',
+)
+split_checkbox.pack(anchor='w')
+
+# Note explicative sur le split tunneling
+split_note = tk.Label(
+    frame_split,
+    text="(Activé : seul le trafic VPN passe par le tunnel. Désactivé : tout le trafic passe par le VPN)",
+    font=('TkDefaultFont', 8),
+    fg='gray',
     anchor='w',
     justify='left',
     wraplength=500,
 )
-split_checkbox.pack(anchor='w')
-
-frame_application = tk.Frame(fenetre)
-frame_application.pack(pady=6, padx=10, fill='x')
-
-tk.Label(frame_application, text="Application en cours d'exécution à utiliser avec le VPN :").grid(row=0, column=0, sticky='w')
-
-app_combobox = ttk.Combobox(
-    frame_application,
-    textvariable=selected_app_var,
-    values=RUNNING_APPS,
-    state='readonly',
-    width=50,
-)
-app_combobox.grid(row=1, column=0, sticky='we', padx=(0, 8), pady=(2, 0))
-app_combobox.bind('<<ComboboxSelected>>', lambda event: choisir_application())
-
-tk.Button(frame_application, text="Rafraîchir la liste", command=refresh_running_apps).grid(
-    row=1, column=1, padx=4
-)
-
-label_application = tk.Label(frame_application, text="Aucune application sélectionnée")
-label_application.grid(row=2, column=0, columnspan=2, sticky='w', pady=(4, 0))
-
-refresh_running_apps()
+split_note.pack(anchor='w', pady=(0, 5))
 
 bouton_connecter = tk.Button(fenetre, text="Se connecter", command=connecter)
 bouton_connecter.pack(pady=10)
