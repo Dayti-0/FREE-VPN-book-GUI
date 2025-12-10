@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""Interface graphique moderne pour l'application VPNBook GUI."""
+"""Interface graphique compacte pour VPNBook."""
 
 import customtkinter as ctk
 from tkinter import messagebox
@@ -24,529 +24,261 @@ from vpn_ops import (
     latency_queue,
 )
 
-# Configuration du thème
 ctk.set_appearance_mode("dark")
 ctk.set_default_color_theme("blue")
 
-# Couleurs personnalisées
 COLORS = {
-    "accent_blue": "#0f3460",
-    "accent_green": "#4ecca3",
-    "accent_red": "#e94560",
-    "text_secondary": "#a0a0a0",
-    "button_hover": "#1e5f74",
+    "green": "#4ecca3",
+    "red": "#e94560",
+    "blue": "#0f3460",
+    "gray": "#a0a0a0",
 }
 
 stop_ping_thread = False
 ping_thread = None
-show_password = False
 
 
 class VPNApp(ctk.CTk):
-    """Application principale VPN avec interface moderne."""
-
     def __init__(self):
         super().__init__()
-
         self.title("VPNBook")
-        self.geometry("500x580")
-        self.minsize(450, 500)
+        self.geometry("380x420")
+        self.minsize(350, 380)
+        self.resizable(True, True)
 
-        # Configuration de la grille principale
-        self.grid_columnconfigure(0, weight=1)
-        self.grid_rowconfigure(0, weight=0)  # Header
-        self.grid_rowconfigure(1, weight=0)  # Server section
-        self.grid_rowconfigure(2, weight=0)  # Auth section
-        self.grid_rowconfigure(3, weight=0)  # Actions section
-        self.grid_rowconfigure(4, weight=1)  # Logs section
+        # Main container
+        main = ctk.CTkFrame(self, fg_color="transparent")
+        main.pack(fill="both", expand=True, padx=10, pady=10)
 
-        self._create_header()
-        self._create_server_section()
-        self._create_auth_section()
-        self._create_actions_section()
-        self._create_logs_section()
+        # Header: Title + Status
+        header = ctk.CTkFrame(main, fg_color="transparent")
+        header.pack(fill="x", pady=(0, 8))
 
-        # Démarrer la mise à jour des latences
-        threading.Thread(target=update_server_latencies, daemon=True).start()
-        self.after(100, self._process_latency_queue)
+        ctk.CTkLabel(header, text="VPNBook", font=ctk.CTkFont(size=20, weight="bold"),
+                     text_color=COLORS["green"]).pack(side="left")
 
-    def _create_header(self):
-        """Crée l'en-tête de l'application."""
-        header_frame = ctk.CTkFrame(self, fg_color="transparent")
-        header_frame.grid(row=0, column=0, padx=15, pady=(15, 5), sticky="ew")
+        self.status = ctk.CTkLabel(header, text="● Déconnecté", font=ctk.CTkFont(size=11),
+                                   text_color=COLORS["red"])
+        self.status.pack(side="right")
 
-        # Titre et statut sur la même ligne
-        title_label = ctk.CTkLabel(
-            header_frame,
-            text="VPNBook",
-            font=ctk.CTkFont(size=24, weight="bold"),
-            text_color=COLORS["accent_green"]
-        )
-        title_label.pack(side="left")
+        # Server selection
+        ctk.CTkLabel(main, text="Serveur:", font=ctk.CTkFont(size=12), anchor="w").pack(fill="x")
+        self.server_var = ctk.StringVar(value=list(SERVER_CHOICES.keys())[0])
+        self.server_combo = ctk.CTkComboBox(main, variable=self.server_var,
+                                            values=list(SERVER_CHOICES.keys()),
+                                            height=30, state="readonly")
+        self.server_combo.pack(fill="x", pady=(2, 8))
 
-        # Indicateur de statut à droite
-        self.status_frame = ctk.CTkFrame(header_frame, fg_color="transparent")
-        self.status_frame.pack(side="right")
+        # Password
+        pwd_frame = ctk.CTkFrame(main, fg_color="transparent")
+        pwd_frame.pack(fill="x", pady=(0, 8))
 
-        self.status_indicator = ctk.CTkLabel(
-            self.status_frame,
-            text="●",
-            font=ctk.CTkFont(size=14),
-            text_color=COLORS["accent_red"]
-        )
-        self.status_indicator.pack(side="left", padx=(0, 5))
+        ctk.CTkLabel(pwd_frame, text="Mot de passe:", font=ctk.CTkFont(size=12)).pack(side="left")
 
-        self.status_label = ctk.CTkLabel(
-            self.status_frame,
-            text="Déconnecté",
-            font=ctk.CTkFont(size=12),
-            text_color=COLORS["text_secondary"]
-        )
-        self.status_label.pack(side="left")
+        self.pwd_entry = ctk.CTkEntry(pwd_frame, height=28, width=150, show="●")
+        self.pwd_entry.pack(side="left", padx=(8, 5))
 
-    def _create_server_section(self):
-        """Crée la section de sélection du serveur."""
-        server_card = ctk.CTkFrame(self, corner_radius=12)
-        server_card.grid(row=1, column=0, padx=15, pady=8, sticky="ew")
+        self.show_btn = ctk.CTkButton(pwd_frame, text="👁", width=30, height=28,
+                                      command=self._toggle_pwd)
+        self.show_btn.pack(side="left")
 
-        # Titre de section
-        section_title = ctk.CTkLabel(
-            server_card,
-            text="Serveur",
-            font=ctk.CTkFont(size=14, weight="bold"),
-            anchor="w"
-        )
-        section_title.pack(padx=15, pady=(12, 8), anchor="w")
+        ctk.CTkButton(pwd_frame, text="↻", width=30, height=28,
+                      command=self._refresh_pwd).pack(side="left", padx=(5, 0))
 
-        # Combobox serveur
-        self.selected_server = ctk.StringVar(value=list(SERVER_CHOICES.keys())[0])
-        self.server_combobox = ctk.CTkComboBox(
-            server_card,
-            variable=self.selected_server,
-            values=list(SERVER_CHOICES.keys()),
-            height=35,
-            font=ctk.CTkFont(size=12),
-            dropdown_font=ctk.CTkFont(size=11),
-            corner_radius=8,
-            state="readonly"
-        )
-        self.server_combobox.pack(padx=15, pady=(0, 5), fill="x")
-
-        # Label latence
-        self.label_latency = ctk.CTkLabel(
-            server_card,
-            text="Latence : --",
-            font=ctk.CTkFont(size=11),
-            text_color=COLORS["text_secondary"]
-        )
-        self.label_latency.pack(padx=15, pady=(0, 12), anchor="w")
-
-    def _create_auth_section(self):
-        """Crée la section d'authentification."""
-        auth_card = ctk.CTkFrame(self, corner_radius=12)
-        auth_card.grid(row=2, column=0, padx=15, pady=8, sticky="ew")
-
-        # Titre de section
-        section_title = ctk.CTkLabel(
-            auth_card,
-            text="Authentification",
-            font=ctk.CTkFont(size=14, weight="bold"),
-            anchor="w"
-        )
-        section_title.pack(padx=15, pady=(12, 8), anchor="w")
-
-        # Identifiant (sur une ligne)
-        id_frame = ctk.CTkFrame(auth_card, fg_color="transparent")
-        id_frame.pack(padx=15, pady=(0, 8), fill="x")
-
-        id_label = ctk.CTkLabel(id_frame, text="ID:", font=ctk.CTkFont(size=12), width=80, anchor="w")
-        id_label.pack(side="left")
-
-        self.entry_id = ctk.CTkEntry(id_frame, height=32, corner_radius=6, font=ctk.CTkFont(size=12))
-        self.entry_id.pack(side="left", fill="x", expand=True)
-        self.entry_id.insert(0, IDENTIFIANT)
-        self.entry_id.configure(state="disabled")
-
-        # Mot de passe (sur une ligne)
-        pwd_frame = ctk.CTkFrame(auth_card, fg_color="transparent")
-        pwd_frame.pack(padx=15, pady=(0, 8), fill="x")
-
-        pwd_label = ctk.CTkLabel(pwd_frame, text="Mot de passe:", font=ctk.CTkFont(size=12), width=80, anchor="w")
-        pwd_label.pack(side="left")
-
-        self.entry_mdp = ctk.CTkEntry(pwd_frame, height=32, corner_radius=6, font=ctk.CTkFont(size=12), show="●")
-        self.entry_mdp.pack(side="left", fill="x", expand=True, padx=(0, 8))
-
-        self.bouton_show_mdp = ctk.CTkButton(
-            pwd_frame,
-            text="Voir",
-            width=50,
-            height=32,
-            corner_radius=6,
-            fg_color=COLORS["accent_blue"],
-            hover_color=COLORS["button_hover"],
-            font=ctk.CTkFont(size=11),
-            command=self._toggle_mot_de_passe
-        )
-        self.bouton_show_mdp.pack(side="left")
-
-        # Charger le mot de passe enregistré ou récupérer depuis le web
-        ancien_mdp = self._charger_mot_de_passe()
-        if ancien_mdp:
-            self.entry_mdp.insert(0, ancien_mdp)
+        # Load saved password or fetch from web
+        saved_pwd = self._load_pwd()
+        if saved_pwd:
+            self.pwd_entry.insert(0, saved_pwd)
         else:
-            self._load_password_from_web()
+            self._fetch_pwd_async()
 
-        # Bouton rafraîchir
-        self.bouton_refresh = ctk.CTkButton(
-            auth_card,
-            text="Rafraîchir le mot de passe depuis VPNBook",
-            height=30,
-            corner_radius=6,
-            fg_color=COLORS["accent_blue"],
-            hover_color=COLORS["button_hover"],
-            font=ctk.CTkFont(size=11),
-            command=self._rafraichir_mdp
-        )
-        self.bouton_refresh.pack(padx=15, pady=(0, 12), fill="x")
+        # Action buttons
+        btn_frame = ctk.CTkFrame(main, fg_color="transparent")
+        btn_frame.pack(fill="x", pady=8)
+        btn_frame.grid_columnconfigure((0, 1, 2), weight=1)
 
-    def _create_actions_section(self):
-        """Crée la section des actions."""
-        actions_card = ctk.CTkFrame(self, corner_radius=12)
-        actions_card.grid(row=3, column=0, padx=15, pady=8, sticky="ew")
+        ctk.CTkButton(btn_frame, text="Connecter", fg_color=COLORS["green"],
+                      text_color="#000", height=35, command=self._connect
+                      ).grid(row=0, column=0, padx=(0, 3), sticky="ew")
 
-        # Frame pour les boutons
-        btn_frame = ctk.CTkFrame(actions_card, fg_color="transparent")
-        btn_frame.pack(padx=15, pady=12, fill="x")
+        ctk.CTkButton(btn_frame, text="Auto", fg_color=COLORS["blue"],
+                      height=35, command=self._auto_connect
+                      ).grid(row=0, column=1, padx=3, sticky="ew")
 
-        # Configurer les colonnes pour répartir les boutons
-        btn_frame.grid_columnconfigure(0, weight=1)
-        btn_frame.grid_columnconfigure(1, weight=1)
-        btn_frame.grid_columnconfigure(2, weight=1)
+        ctk.CTkButton(btn_frame, text="Déco", fg_color=COLORS["red"],
+                      height=35, command=self._disconnect
+                      ).grid(row=0, column=2, padx=(3, 0), sticky="ew")
 
-        # Bouton Connecter
-        self.bouton_connecter = ctk.CTkButton(
-            btn_frame,
-            text="Connecter",
-            height=40,
-            corner_radius=8,
-            fg_color=COLORS["accent_green"],
-            hover_color="#3ba583",
-            text_color="#000000",
-            font=ctk.CTkFont(size=13, weight="bold"),
-            command=self._connecter
-        )
-        self.bouton_connecter.grid(row=0, column=0, padx=(0, 5), sticky="ew")
-
-        # Bouton VPN rapide
-        self.bouton_fastest = ctk.CTkButton(
-            btn_frame,
-            text="Auto",
-            height=40,
-            corner_radius=8,
-            fg_color=COLORS["accent_blue"],
-            hover_color=COLORS["button_hover"],
-            font=ctk.CTkFont(size=13, weight="bold"),
-            command=self._connecter_plus_rapide
-        )
-        self.bouton_fastest.grid(row=0, column=1, padx=5, sticky="ew")
-
-        # Bouton Déconnecter
-        self.bouton_deconnecter = ctk.CTkButton(
-            btn_frame,
-            text="Déconnecter",
-            height=40,
-            corner_radius=8,
-            fg_color=COLORS["accent_red"],
-            hover_color="#c73e54",
-            font=ctk.CTkFont(size=13, weight="bold"),
-            command=self._deconnecter_action
-        )
-        self.bouton_deconnecter.grid(row=0, column=2, padx=(5, 0), sticky="ew")
-
-        # Barre de progression
-        self.progress = ctk.CTkProgressBar(
-            actions_card,
-            height=6,
-            corner_radius=3,
-            progress_color=COLORS["accent_green"]
-        )
-        self.progress.pack(padx=15, pady=(0, 12), fill="x")
+        # Progress bar
+        self.progress = ctk.CTkProgressBar(main, height=5, progress_color=COLORS["green"])
+        self.progress.pack(fill="x", pady=(0, 8))
         self.progress.set(0)
 
-    def _create_logs_section(self):
-        """Crée la section des logs."""
-        logs_card = ctk.CTkFrame(self, corner_radius=12)
-        logs_card.grid(row=4, column=0, padx=15, pady=(8, 15), sticky="nsew")
+        # Latency label
+        self.latency_label = ctk.CTkLabel(main, text="Latence: --",
+                                          font=ctk.CTkFont(size=11), text_color=COLORS["gray"])
+        self.latency_label.pack(anchor="w")
 
-        # Configuration de la grille
-        logs_card.grid_columnconfigure(0, weight=1)
-        logs_card.grid_rowconfigure(1, weight=1)
+        # Logs
+        self.logs = ctk.CTkTextbox(main, height=120, font=ctk.CTkFont(family="Consolas", size=10),
+                                   state="disabled")
+        self.logs.pack(fill="both", expand=True, pady=(5, 0))
 
-        # Header des logs
-        logs_header = ctk.CTkFrame(logs_card, fg_color="transparent")
-        logs_header.grid(row=0, column=0, padx=15, pady=(12, 8), sticky="ew")
+        # Start latency updates
+        threading.Thread(target=update_server_latencies, daemon=True).start()
+        self.after(100, self._process_queue)
 
-        section_title = ctk.CTkLabel(
-            logs_header,
-            text="Logs",
-            font=ctk.CTkFont(size=14, weight="bold"),
-            anchor="w"
-        )
-        section_title.pack(side="left")
+        self._show_pwd = False
 
-        self.bouton_save_logs = ctk.CTkButton(
-            logs_header,
-            text="Sauvegarder",
-            width=90,
-            height=26,
-            corner_radius=6,
-            fg_color=COLORS["accent_blue"],
-            hover_color=COLORS["button_hover"],
-            font=ctk.CTkFont(size=11),
-            command=self._sauvegarder_logs
-        )
-        self.bouton_save_logs.pack(side="right")
+    def _log(self, msg):
+        self.logs.configure(state="normal")
+        self.logs.insert("end", msg + "\n")
+        self.logs.see("end")
+        self.logs.configure(state="disabled")
 
-        # Zone de texte des logs
-        self.text_log = ctk.CTkTextbox(
-            logs_card,
-            corner_radius=8,
-            font=ctk.CTkFont(family="Consolas", size=11),
-            wrap="word",
-            state="disabled"
-        )
-        self.text_log.grid(row=1, column=0, padx=15, pady=(0, 12), sticky="nsew")
-
-    # -------------------- Utilitaires --------------------
-
-    def _ajouter_log(self, texte):
-        """Ajoute une ligne de log dans la zone de texte."""
-        self.text_log.configure(state="normal")
-        self.text_log.insert("end", texte + "\n")
-        self.text_log.see("end")
-        self.text_log.configure(state="disabled")
-
-    def _charger_mot_de_passe(self):
+    def _load_pwd(self):
         if os.path.exists(MDP_FILE):
-            with open(MDP_FILE, "r") as f:
-                data = json.load(f)
-                return data.get("mot_de_passe", "")
+            with open(MDP_FILE) as f:
+                return json.load(f).get("mot_de_passe", "")
         return ""
 
-    def _enregistrer_mot_de_passe(self, mot_de_passe):
+    def _save_pwd(self, pwd):
         with open(MDP_FILE, "w") as f:
-            json.dump({"mot_de_passe": mot_de_passe}, f)
+            json.dump({"mot_de_passe": pwd}, f)
 
-    def _load_password_from_web(self):
-        """Charge le mot de passe depuis VPNBook en arrière-plan."""
+    def _fetch_pwd_async(self):
         def worker():
-            password = fetch_vpnbook_password()
-            if password:
-                self.after(0, lambda: self._set_password(password))
-                self.after(0, lambda: self._ajouter_log(f"Mot de passe récupéré: {password}"))
+            pwd = fetch_vpnbook_password()
+            if pwd:
+                self.after(0, lambda: self._set_pwd(pwd))
+                self.after(0, lambda: self._log(f"Mot de passe: {pwd}"))
+            else:
+                self.after(0, lambda: self._log("Échec récupération mot de passe"))
         threading.Thread(target=worker, daemon=True).start()
 
-    def _set_password(self, password):
-        """Met à jour le champ mot de passe."""
-        self.entry_mdp.delete(0, "end")
-        self.entry_mdp.insert(0, password)
+    def _set_pwd(self, pwd):
+        self.pwd_entry.delete(0, "end")
+        self.pwd_entry.insert(0, pwd)
+
+    def _toggle_pwd(self):
+        self._show_pwd = not self._show_pwd
+        self.pwd_entry.configure(show="" if self._show_pwd else "●")
+
+    def _refresh_pwd(self):
+        self._log("Récupération du mot de passe...")
+        self._fetch_pwd_async()
 
     def _update_status(self, connected):
-        """Met à jour l'indicateur de statut."""
         if connected:
-            self.status_indicator.configure(text_color=COLORS["accent_green"])
-            self.status_label.configure(text="Connecté")
+            self.status.configure(text="● Connecté", text_color=COLORS["green"])
         else:
-            self.status_indicator.configure(text_color=COLORS["accent_red"])
-            self.status_label.configure(text="Déconnecté")
+            self.status.configure(text="● Déconnecté", text_color=COLORS["red"])
 
-    def _formater_message_erreur(self, output):
-        """Retourne un message plus explicite en cas d'échec rasdial."""
-        if not output:
-            return "Échec de la connexion : aucune sortie fournie par rasdial."
+    def _start_progress(self):
+        self._running = True
+        self._animate()
 
-        texte = output if isinstance(output, str) else str(output)
-        texte_clean = texte.replace("\r", "").strip()
+    def _animate(self):
+        if getattr(self, "_running", False):
+            v = self.progress.get()
+            self.progress.set(0 if v >= 1 else v + 0.03)
+            self.after(40, self._animate)
 
-        if "807" in texte_clean:
-            return (
-                "Erreur 807 : connexion interrompue.\n"
-                "Essayez un autre serveur."
-            )
+    def _stop_progress(self):
+        self._running = False
+        self.progress.set(0)
 
-        if "619" in texte_clean:
-            return (
-                "Erreur 619 : impossible d'établir la session.\n"
-                "Vérifiez vos identifiants ou votre antivirus."
-            )
-
-        return f"Échec : {texte_clean}"
-
-    # -------------------- Actions VPN --------------------
-
-    def _connecter(self):
-        self._ajouter_log("Connexion en cours...")
+    def _connect(self):
+        self._log("Connexion...")
         self._start_progress()
-        self.bouton_connecter.configure(state="disabled")
-        self.bouton_fastest.configure(state="disabled")
-        threading.Thread(target=self._connecter_thread).start()
+        threading.Thread(target=self._connect_thread).start()
 
-    def _connecter_plus_rapide(self):
-        self._ajouter_log("Recherche du serveur le plus rapide...")
+    def _auto_connect(self):
+        self._log("Recherche serveur rapide...")
         self._start_progress()
-        self.bouton_connecter.configure(state="disabled")
-        self.bouton_fastest.configure(state="disabled")
-        threading.Thread(target=self._connecter_plus_rapide_thread).start()
+        threading.Thread(target=self._auto_thread).start()
 
-    def _connecter_plus_rapide_thread(self):
-        country, ip, latency = find_fastest_server()
+    def _auto_thread(self):
+        country, ip, lat = find_fastest_server()
         if not ip:
             self.after(0, self._stop_progress)
-            self.after(0, lambda: messagebox.showerror("Erreur", "Aucun serveur joignable."))
-            self.after(0, lambda: self._ajouter_log("Aucun serveur joignable."))
+            self.after(0, lambda: self._log("Aucun serveur disponible"))
             return
-        self.after(0, lambda: self._ajouter_log(f"Serveur: {ip} ({country}) - {latency}ms"))
-        threading.Thread(target=self._connecter_thread, args=(country, ip)).start()
+        self.after(0, lambda: self._log(f"Serveur: {ip} ({lat}ms)"))
+        self._connect_thread(country, ip)
 
-    def _connecter_thread(self, country=None, ip=None):
+    def _connect_thread(self, country=None, ip=None):
         global stop_ping_thread
 
-        if ip is None or country is None:
-            label = self.selected_server.get()
-            label = re.sub(r"\s*\(.*?ms\)", "", label).strip()
+        if not ip:
+            label = re.sub(r"\s*\(.*?ms\)", "", self.server_var.get()).strip()
             country, ip = SERVER_CHOICES[label]
 
-        mot_de_passe = self.entry_mdp.get()
+        pwd = self.pwd_entry.get()
 
         if est_connecte():
-            self._ajouter_log("Déconnexion de la session existante...")
+            self._log("Déconnexion en cours...")
             deconnecter_vpn()
 
         try:
-            self._ajouter_log(f"Connexion à {ip}...")
+            self._log(f"Connexion à {ip}...")
             creer_ou_mettre_a_jour_vpn(ip, split_tunneling=False)
-            connecter_vpn(mot_de_passe)
-            self._enregistrer_mot_de_passe(mot_de_passe)
+            connecter_vpn(pwd)
+            self._save_pwd(pwd)
 
             self.after(0, self._stop_progress)
             self.after(0, lambda: self._update_status(True))
-            self.after(0, lambda: messagebox.showinfo("Succès", "Connexion établie!"))
-            self._ajouter_log("Connecté!")
+            self._log("Connecté!")
 
             if country in ASCII_LOGOS:
-                self._ajouter_log(ASCII_LOGOS[country])
+                self._log(ASCII_LOGOS[country])
 
-            self._lancer_ping_thread(ip)
+            self._start_ping(ip)
 
         except subprocess.CalledProcessError as e:
-            message = self._formater_message_erreur(getattr(e, "output", ""))
+            out = getattr(e, "output", "")
+            msg = "Erreur 807: serveur saturé" if "807" in str(out) else f"Erreur: {out}"
             self.after(0, self._stop_progress)
-            self.after(0, lambda: self._update_status(False))
-            self.after(0, lambda: messagebox.showerror("Erreur", message))
-            self._ajouter_log(message)
+            self._log(msg)
 
-    def _start_progress(self):
-        """Démarre l'animation de la barre de progression."""
-        self._progress_running = True
-        self._animate_progress()
-
-    def _animate_progress(self):
-        """Animation de la barre de progression."""
-        if hasattr(self, "_progress_running") and self._progress_running:
-            current = self.progress.get()
-            if current >= 1:
-                self.progress.set(0)
-            else:
-                self.progress.set(current + 0.02)
-            self.after(50, self._animate_progress)
-
-    def _stop_progress(self):
-        """Arrête la barre de progression."""
-        self._progress_running = False
-        self.progress.set(0)
-        self.bouton_connecter.configure(state="normal")
-        self.bouton_fastest.configure(state="normal")
-
-    def _deconnecter_action(self):
+    def _disconnect(self):
         global stop_ping_thread
         stop_ping_thread = True
-        self._ajouter_log("Déconnexion...")
+        self._log("Déconnexion...")
         if deconnecter_vpn():
             self._update_status(False)
-            messagebox.showinfo("Déconnexion", "Déconnecté du VPN.")
-            self._ajouter_log("Déconnecté.")
-            self.label_latency.configure(text="Latence : --")
+            self._log("Déconnecté")
+            self.latency_label.configure(text="Latence: --")
         else:
-            messagebox.showerror("Erreur", "Échec de la déconnexion.")
-            self._ajouter_log("Échec de la déconnexion.")
+            self._log("Échec déconnexion")
 
-    def _measure_and_update_latency(self, ip):
-        latence_ms = measure_latency(ip)
-        if latence_ms is not None:
-            self.after(0, lambda: self.label_latency.configure(text=f"Latence : {latence_ms} ms"))
-        else:
-            self.after(0, lambda: self.label_latency.configure(text="Latence : --"))
-
-    def _ping_serveur(self, ip):
-        global stop_ping_thread
+    def _start_ping(self, ip):
+        global ping_thread, stop_ping_thread
         stop_ping_thread = False
-        while not stop_ping_thread:
-            if est_connecte():
-                self._measure_and_update_latency(ip)
-            else:
-                self.after(0, lambda: self.label_latency.configure(text="Latence : --"))
-            time.sleep(2)
-
-    def _lancer_ping_thread(self, ip):
-        global ping_thread
         if ping_thread and ping_thread.is_alive():
             return
-        ping_thread = threading.Thread(target=self._ping_serveur, args=(ip,), daemon=True)
+        ping_thread = threading.Thread(target=self._ping_loop, args=(ip,), daemon=True)
         ping_thread.start()
 
-    def _process_latency_queue(self):
+    def _ping_loop(self, ip):
+        global stop_ping_thread
+        while not stop_ping_thread:
+            if est_connecte():
+                lat = measure_latency(ip)
+                txt = f"Latence: {lat}ms" if lat else "Latence: --"
+                self.after(0, lambda t=txt: self.latency_label.configure(text=t))
+            time.sleep(2)
+
+    def _process_queue(self):
         try:
-            new_values = latency_queue.get_nowait()
+            vals = latency_queue.get_nowait()
+            self.server_combo.configure(values=vals)
+            if vals:
+                self.server_combo.set(vals[0])
         except queue.Empty:
             pass
-        else:
-            self.server_combobox.configure(values=new_values)
-            if new_values:
-                self.server_combobox.set(new_values[0])
-        finally:
-            self.after(100, self._process_latency_queue)
-
-    def _toggle_mot_de_passe(self):
-        global show_password
-        show_password = not show_password
-        if show_password:
-            self.entry_mdp.configure(show="")
-            self.bouton_show_mdp.configure(text="Cacher")
-        else:
-            self.entry_mdp.configure(show="●")
-            self.bouton_show_mdp.configure(text="Voir")
-
-    def _sauvegarder_logs(self):
-        """Sauvegarde le contenu des logs dans un fichier texte."""
-        with open("vpn_logs.txt", "w", encoding="utf-8") as f:
-            contenu = self.text_log.get("1.0", "end").strip()
-            f.write(contenu)
-        messagebox.showinfo("Sauvegarde", "Logs sauvegardés dans vpn_logs.txt")
-
-    def _rafraichir_mdp(self):
-        """Recharge le mot de passe depuis VPNBook."""
-        self._ajouter_log("Récupération du mot de passe...")
-        def worker():
-            password = fetch_vpnbook_password()
-            if password:
-                self.after(0, lambda: self._set_password(password))
-                self.after(0, lambda: self._ajouter_log(f"Mot de passe: {password}"))
-            else:
-                self.after(0, lambda: self._ajouter_log("Impossible de récupérer le mot de passe."))
-        threading.Thread(target=worker, daemon=True).start()
+        self.after(100, self._process_queue)
 
 
 if __name__ == "__main__":
-    app = VPNApp()
-    app.mainloop()
+    VPNApp().mainloop()
