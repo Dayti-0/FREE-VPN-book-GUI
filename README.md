@@ -30,5 +30,5 @@ utiliser le même interpréteur Python que celui utilisé pour lancer
 l'application) :
 
 ```bash
-python -m pip install requests pillow beautifulsoup4
+pip install -r requirements.txt
 ```
