@@ -53,6 +53,31 @@ def enregistrer_mot_de_passe(mot_de_passe):
         json.dump({'mot_de_passe': mot_de_passe}, f)
 
 
+def formater_message_erreur(output):
+    """Retourne un message plus explicite en cas d'échec rasdial."""
+    if not output:
+        return "Échec de la connexion : aucune sortie fournie par rasdial."
+
+    texte = output if isinstance(output, str) else str(output)
+    texte_clean = texte.replace('\r', '').strip()
+
+    if "807" in texte_clean:
+        return (
+            "Erreur 807 : la connexion a été interrompue (latence élevée ou serveur saturé).\n"
+            "Essayez un autre serveur VPN ou réessayez dans quelques instants.\n\n"
+            f"Détails rasdial : {texte_clean}"
+        )
+
+    if "619" in texte_clean:
+        return (
+            "Erreur 619 : impossible d'établir la session.\n"
+            "Vérifiez vos identifiants, le réseau ou désactivez temporairement votre antivirus.\n\n"
+            f"Détails rasdial : {texte_clean}"
+        )
+
+    return f"Échec de la connexion : {texte_clean}"
+
+
 # -------------------- Connexion / VPN --------------------
 def connecter():
     ajouter_log("Tentative de connexion...")
@@ -126,9 +151,10 @@ def connecter_thread(country=None, ip=None):
             )
 
     except subprocess.CalledProcessError as e:  # type: ignore[name-defined]
+        message = formater_message_erreur(getattr(e, 'output', ''))
         fenetre.after(0, stop_progress)
-        fenetre.after(0, lambda: messagebox.showerror("Erreur", f"Échec de la connexion : {e.output}"))
-        ajouter_log(f"Échec de la connexion : {e.output}")
+        fenetre.after(0, lambda: messagebox.showerror("Erreur", message))
+        ajouter_log(message)
 
 
 def stop_progress():
