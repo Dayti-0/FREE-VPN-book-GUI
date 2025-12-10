@@ -1,0 +1,10 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+
+# Logs
+vpn_logs.txt
+
+# Password file
+mdp_vpnbook.json
